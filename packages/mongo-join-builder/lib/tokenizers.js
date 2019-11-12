@@ -64,15 +64,15 @@ const relationshipTokenizer = (listAdapter, query, queryKey, path, uid) => {
     [`${fieldAdapter.path}_some`]: 'some',
     [`${fieldAdapter.path}_none`]: 'none',
   }[queryKey];
-
-  // We use `ifNull` here to handle the case unique to mongo where a record may be
-  // entirely missing a field (or have the value set to `null`).
+  const refListAdapter2 = fieldAdapter.getRefListAdapter();
+  const { rel } = fieldAdapter;
+  const { tableName } = rel;
   const field = fieldAdapter.path;
   const uniqueField = `${uid}_${field}`;
   const fieldSize = { $size: `$${uniqueField}` };
   const expr = {
     only: { $eq: [fieldSize, 1] },
-    every: { $eq: [fieldSize, { $size: { $ifNull: [`$${field}`, []] } }] },
+    every: { $eq: [fieldSize, { $size: `$${uniqueField}_all` }] },
     none: { $eq: [fieldSize, 0] },
     some: { $gt: [fieldSize, 0] },
   }[filterType];
@@ -80,9 +80,15 @@ const relationshipTokenizer = (listAdapter, query, queryKey, path, uid) => {
   return {
     matchTerm: { $expr: expr },
     relationshipInfo: {
-      from: fieldAdapter.getRefListAdapter().model.collection.name, // the collection name to join with
-      field: fieldAdapter.path, // The field on this collection
-      many: fieldAdapter.field.many, // Flag this is a to-many relationship
+      from:
+        rel.cardinality === 'N:N'
+          ? refListAdapter2._getModel(tableName).collection.name
+          : refListAdapter2.model.collection.name, // the collection name to join with
+      fromTable: refListAdapter2.key,
+      fromCollection: refListAdapter2.model.collection.name,
+      thisTable: refListAdapter.key,
+      rel: fieldAdapter.rel,
+      filterType,
       uniqueField,
     },
   };

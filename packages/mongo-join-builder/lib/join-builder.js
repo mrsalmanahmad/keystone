@@ -85,26 +85,89 @@ function mutationBuilder(relationships, path = []) {
   );
 }
 
+const lookupStage = ({ from, as, targetKey, foreignKey, extraPipeline = [] }) => ({
+  $lookup: {
+    from,
+    as,
+    let: { tmpVar: `$${targetKey}` },
+    pipeline: [{ $match: { $expr: { $eq: [`$${foreignKey}`, '$$tmpVar'] } } }, ...extraPipeline],
+  },
+});
+
 function relationshipPipeline(relationship) {
-  const { field, many, from, uniqueField } = relationship.relationshipInfo;
-  const idsName = `${uniqueField}_id${many ? 's' : ''}`;
-  return [
-    {
-      $lookup: {
+  const {
+    from,
+    fromTable,
+    thisTable,
+    rel,
+    fromCollection,
+    filterType,
+    uniqueField,
+  } = relationship.relationshipInfo;
+  const { cardinality } = rel;
+  let ret;
+  const extraPipeline = pipelineBuilder(relationship);
+  if (cardinality === '1:N' || cardinality === 'N:1') {
+    let targetKey, foreignKey;
+    if (rel.tableName === thisTable) {
+      targetKey = rel.columnName;
+      foreignKey = '_id';
+    } else {
+      targetKey = '_id';
+      foreignKey = rel.columnName;
+    }
+    ret = [
+      // Join against all the items which match the relationship filter condition
+      lookupStage({ from, as: uniqueField, targetKey, foreignKey, extraPipeline }),
+    ];
+    if (filterType === 'every') {
+      ret.push(
+        // Match against *all* the items. Required for the _every condition below
+        lookupStage({ from, as: `${uniqueField}_all`, targetKey, foreignKey, extraPipeline: [] })
+      );
+    }
+  } else {
+    const targetKey = '_id';
+    const foreignKey = `${thisTable}_id`;
+    ret = [
+      lookupStage({
         from,
         as: uniqueField,
-        // We use `ifNull` here to handle the case unique to mongo where a record may be
-        // entirely missing a field (or have the value set to `null`).
-        let: { [idsName]: many ? { $ifNull: [`$${field}`, []] } : `$${field}` },
-        pipeline: [
-          // The ID / list of IDs we're joining by. Do this very first so it limits any work
-          // required in subsequent steps / $and's.
-          { $match: { $expr: { [many ? '$in' : '$eq']: ['$_id', `$$${idsName}`] } } },
-          ...pipelineBuilder(relationship),
+        targetKey,
+        foreignKey,
+        extraPipeline: [
+          lookupStage({
+            from: fromCollection,
+            as: `${uniqueField}_0`,
+            targetKey: `${fromTable}_id`,
+            foreignKey: '_id',
+            extraPipeline,
+          }),
+          { $match: { $expr: { $gt: [{ $size: `$${uniqueField}_0` }, 0] } } },
         ],
-      },
-    },
-  ];
+      }),
+    ];
+    if (filterType === 'every') {
+      ret.push(
+        lookupStage({
+          from,
+          as: `${uniqueField}_all`,
+          targetKey,
+          foreignKey,
+          extraPipeline: [
+            lookupStage({
+              from: fromCollection,
+              as: `${uniqueField}_0`,
+              targetKey: `${fromTable}_id`,
+              foreignKey: '_id',
+              extraPipeline: [],
+            }),
+          ],
+        })
+      );
+    }
+  }
+  return ret;
 }
 
 function pipelineBuilder({ relationships, matchTerm, excludeFields, postJoinPipeline }) {
