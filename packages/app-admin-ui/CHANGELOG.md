@@ -1,5 +1,11 @@
 # @keystonejs/app-admin-ui
 
+## 5.5.5
+
+### Patch Changes
+
+- [`87a17087`](https://github.com/keystonejs/keystone/commit/87a170877d9f735d909ee91b7661fa4a10b56a59) [#2087](https://github.com/keystonejs/keystone/pull/2087) - Show a more helpful error in the AdminUI when the list page overflows the available number of items.
+
 ## 5.5.4
 
 ### Patch Changes
